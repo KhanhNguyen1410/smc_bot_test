@@ -40,19 +40,19 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
         last_swing_low_val = recent_swing_lows['low'].iloc[-1]
         last_swing_low_idx = recent_swing_lows.index[-1]
         
-        sweep_candle = None
-        # Tìm nến quét (sau cái swing low đó)
-        for i in range(df.index.get_loc(last_swing_low_idx) + 1, len(df)):
-            candle = df.iloc[i]
-            if candle['low'] < last_swing_low_val and candle['close'] > last_swing_low_val:
-                # Có quét thanh khoản kèm RSI quá bán (<= 40 cho phép sai số một chút)
-                if candle['rsi'] <= 40:
-                    sweep_candle = candle
-                    break
-                    
-        if sweep_candle is None:
+        # Lấy mảng dữ liệu từ sau cái swing low
+        post_swing_df = df.loc[last_swing_low_idx:].iloc[1:]
+        if post_swing_df.empty:
             return None
             
+        # Tìm nến Sweep bằng mảng logic (Vectorized)
+        sweep_mask = (post_swing_df['low'] < last_swing_low_val) & (post_swing_df['close'] > last_swing_low_val) & (post_swing_df['rsi'] <= 40)
+        valid_sweeps = post_swing_df[sweep_mask]
+        if valid_sweeps.empty:
+            return None
+            
+        sweep_candle = valid_sweeps.iloc[0] # Lấy cây quét đầu tiên xảy ra
+        
         # Tìm MSS (Market Structure Shift) phá vỡ đỉnh dẫn hướng gần nhất trước cú quét
         swing_highs_before_sweep = df.loc[:sweep_candle.name][df['swing_high'] == True]
         if swing_highs_before_sweep.empty:
@@ -60,33 +60,36 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
             
         target_high_val = swing_highs_before_sweep['high'].iloc[-1]
         
-        mss_candle = None
-        for i in range(df.index.get_loc(sweep_candle.name) + 1, len(df)):
-            candle = df.iloc[i]
-            if candle['close'] > target_high_val:
-                # Bộ lọc Volume: Khối lượng ở nến phá vỡ phải lớn hơn Volume SMA
-                if candle['volume'] > candle['volume_sma_20']:
-                    mss_candle = candle
-                    break
-                    
-        if mss_candle is None:
+        # Lấy mảng dữ liệu từ sau nến Sweep
+        post_sweep_df = df.loc[sweep_candle.name:].iloc[1:]
+        if post_sweep_df.empty:
             return None
             
+        # Tìm nến MSS bằng mảng logic (Vectorized)
+        mss_mask = (post_sweep_df['close'] > target_high_val) & (post_sweep_df['volume'] > post_sweep_df['volume_sma_20'])
+        valid_mss = post_sweep_df[mss_mask]
+        
+        if valid_mss.empty:
+            return None
+            
+        mss_candle = valid_mss.iloc[0] # Lấy cây phá ngưỡng đầu tiên
+            
         # Tìm FVG tăng giá hình thành từ lúc Sweep đến MSS
-        start_idx_loc = df.index.get_loc(sweep_candle.name)
-        end_idx_loc = df.index.get_loc(mss_candle.name)
+        fvg_df = df.loc[sweep_candle.name:mss_candle.name]
         
         fvg = None
-        for i in range(start_idx_loc, end_idx_loc):
-            if i+2 >= len(df):
-                continue
-            candle1 = df.iloc[i]
-            candle3 = df.iloc[i+2]
+        # Mảng shift nến để tìm FVG (Vectorized shift)
+        if len(fvg_df) >= 3:
+            fvg_mask = fvg_df['low'].shift(-2) > fvg_df['high']
+            # Cây nến số 1 (i) thoả mãn điều kiện fvg_mask = True
+            valid_fvgs = fvg_df[fvg_mask]
             
-            # FVG Tăng
-            if candle3['low'] > candle1['high']:
-                fvg = {'top': candle3['low'], 'bottom': candle1['high']}
-                break
+            if not valid_fvgs.empty:
+                fvg_idx = valid_fvgs.index[0]
+                candle1_high = fvg_df.loc[fvg_idx, 'high']
+                candle3_idx = fvg_df.index[fvg_df.index.get_loc(fvg_idx) + 2]
+                candle3_low = fvg_df.loc[candle3_idx, 'low']
+                fvg = {'top': candle3_low, 'bottom': candle1_high}
                 
         if fvg is None:
             return None
@@ -139,16 +142,19 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
         last_swing_high_val = recent_swing_highs['high'].iloc[-1]
         last_swing_high_idx = recent_swing_highs.index[-1]
         
-        sweep_candle = None
-        for i in range(df.index.get_loc(last_swing_high_idx) + 1, len(df)):
-            candle = df.iloc[i]
-            if candle['high'] > last_swing_high_val and candle['close'] < last_swing_high_val:
-                if candle['rsi'] >= 60:
-                    sweep_candle = candle
-                    break
-                    
-        if sweep_candle is None:
+        # Lấy mảng dữ liệu từ sau cái swing high
+        post_swing_df = df.loc[last_swing_high_idx:].iloc[1:]
+        if post_swing_df.empty:
             return None
+            
+        # Tìm nến Sweep bằng mảng logic (Vectorized)
+        sweep_mask = (post_swing_df['high'] > last_swing_high_val) & (post_swing_df['close'] < last_swing_high_val) & (post_swing_df['rsi'] >= 60)
+        valid_sweeps = post_swing_df[sweep_mask]
+        
+        if valid_sweeps.empty:
+            return None
+            
+        sweep_candle = valid_sweeps.iloc[0]
             
         swing_lows_before_sweep = df.loc[:sweep_candle.name][df['swing_low'] == True]
         if swing_lows_before_sweep.empty:
@@ -156,31 +162,34 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
             
         target_low_val = swing_lows_before_sweep['low'].iloc[-1]
         
-        mss_candle = None
-        for i in range(df.index.get_loc(sweep_candle.name) + 1, len(df)):
-            candle = df.iloc[i]
-            if candle['close'] < target_low_val:
-                if candle['volume'] > candle['volume_sma_20']:
-                    mss_candle = candle
-                    break
-                    
-        if mss_candle is None:
+        # Lấy mảng dữ liệu từ sau nến Sweep
+        post_sweep_df = df.loc[sweep_candle.name:].iloc[1:]
+        if post_sweep_df.empty:
             return None
             
-        start_idx_loc = df.index.get_loc(sweep_candle.name)
-        end_idx_loc = df.index.get_loc(mss_candle.name)
+        # Tìm nến MSS bằng mảng logic (Vectorized)
+        mss_mask = (post_sweep_df['close'] < target_low_val) & (post_sweep_df['volume'] > post_sweep_df['volume_sma_20'])
+        valid_mss = post_sweep_df[mss_mask]
         
-        fvg = None
-        for i in range(start_idx_loc, end_idx_loc):
-            if i+2 >= len(df):
-                continue
-            candle1 = df.iloc[i]
-            candle3 = df.iloc[i+2]
+        if valid_mss.empty:
+            return None
             
-            # FVG Giảm
-            if candle3['high'] < candle1['low']:
-                fvg = {'top': candle1['low'], 'bottom': candle3['high']}
-                break
+        mss_candle = valid_mss.iloc[0]
+            
+        fvg_df = df.loc[sweep_candle.name:mss_candle.name]
+        fvg = None
+        
+        # Mảng shift nến để tìm FVG (Vectorized shift)
+        if len(fvg_df) >= 3:
+            fvg_mask = fvg_df['high'].shift(-2) < fvg_df['low']
+            valid_fvgs = fvg_df[fvg_mask]
+            
+            if not valid_fvgs.empty:
+                fvg_idx = valid_fvgs.index[0]
+                candle1_low = fvg_df.loc[fvg_idx, 'low']
+                candle3_idx = fvg_df.index[fvg_df.index.get_loc(fvg_idx) + 2]
+                candle3_high = fvg_df.loc[candle3_idx, 'high']
+                fvg = {'top': candle1_low, 'bottom': candle3_high}
                 
         if fvg is None:
             return None

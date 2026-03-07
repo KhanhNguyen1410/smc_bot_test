@@ -9,6 +9,18 @@ def load_config():
     with open(os.path.join(os.path.dirname(__file__), 'config.json'), 'r') as f:
         return json.load(f)
 
+def load_state():
+    state_file = os.path.join(os.path.dirname(__file__), 'state.json')
+    if os.path.exists(state_file):
+        with open(state_file, 'r') as f:
+            return json.load(f)
+    return {"run_count": 0}
+
+def save_state(state):
+    state_file = os.path.join(os.path.dirname(__file__), 'state.json')
+    with open(state_file, 'w') as f:
+        json.dump(state, f)
+
 def scan_markets():
     print("Bắt đầu quét thị trường...")
     config = load_config()
@@ -67,6 +79,17 @@ def scan_markets():
                 send_alert(msg)
             
     print("Đã hoàn tất 1 chu kỳ quét.\n")
+    
+    # Logic kiểm tra Heartbeat (Báo cáo sinh tồn)
+    state = load_state()
+    state["run_count"] += 1
+    heartbeat_runs = config.get("heartbeat_interval_runs", 10)
+    
+    if state["run_count"] >= heartbeat_runs:
+        send_alert(f"🟢 *BOT HEARTBEAT*\nSMC Scanner vẫn đang chạy bình thường.\nĐã hoàn thành {state['run_count']} chu kỳ quét kể từ lần báo cáo trước.")
+        state["run_count"] = 0 # reset biến đếm
+        
+    save_state(state)
 
 if __name__ == "__main__":
     scan_markets()

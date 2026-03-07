@@ -32,5 +32,6 @@
             "1d"
         ]
     },
-    "interval_minutes": 10
+    "interval_minutes": 10,
+    "heartbeat_interval_runs": 10
 }

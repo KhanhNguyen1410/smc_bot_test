@@ -83,14 +83,6 @@ def scan_markets():
             
     print("Đã hoàn tất 1 chu kỳ quét.\n")
     
-    # Báo cáo tổng kết mỗi lần chạy (theo yêu cầu mới)
-    summary_msg = f"📊 *BÁO CÁO QUÉT SMC ({len(symbols)} CẶP)*\n"
-    if signals_found > 0:
-        summary_msg += f"✅ Tìm thấy {signals_found} tín hiệu mới (chi tiết ở trên)."
-    else:
-        summary_msg += f"❌ Không có tín hiệu nào thỏa mãn điều kiện ở chu kỳ này."
-    send_alert(summary_msg)
-    
     # Logic kiểm tra Heartbeat (Báo cáo sinh tồn)
     state = load_state()
     state["run_count"] += 1

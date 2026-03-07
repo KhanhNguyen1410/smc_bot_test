@@ -1,0 +1,36 @@
+{
+    "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "LINKUSDT",
+        "XRPUSDT",
+        "BNBUSDT",
+        "WLDUSDT",
+        "APTUSDT",
+        "SOLUSDT",
+        "DYDXUSDT",
+        "AVAXUSDT",
+        "DOGEUSDT",
+        "DOTUSDT",
+        "ADAUSDT",
+        "OPUSDT",
+        "ARBUSDT",
+        "INJUSDT",
+        "RNDRUSDT",
+        "FETUSDT",
+        "SUIUSDT"
+    ],
+    "timeframes": {
+        "ltf": [
+            "5m",
+            "15m",
+            "1h"
+        ],
+        "mtf": "1h",
+        "htf": [
+            "4h",
+            "1d"
+        ]
+    },
+    "interval_minutes": 10
+}

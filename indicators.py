@@ -3,7 +3,8 @@ import numpy as np
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Tính toán các chỉ báo cho phân tích SMC: EMA50, EMA200, RSI(14), Volume SMA(20) và Swing High/Low
+    Tính toán các chỉ báo cho phân tích SMC: EMA50, EMA200, RSI(14), Volume SMA(20), 
+    Bollinger Bands và Swing High/Low
     """
     if len(df) < 200:
         return df
@@ -28,6 +29,12 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     
     # Volume SMA 20
     df['volume_sma_20'] = df['volume'].rolling(window=20).mean()
+    
+    # Bollinger Bands: SMA 20, Upper Band (SMA + 2 StdDev), Lower Band (SMA - 2 StdDev)
+    df['bb_middle'] = df['close'].rolling(window=20).mean()  # SMA 20
+    bb_std = df['close'].rolling(window=20).std()
+    df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
+    df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
     
     # Swing Highs and Lows (Window = 5: 2 trái, 1 giữa, 2 phải)
     df['swing_high'] = False

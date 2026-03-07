@@ -11,9 +11,13 @@ def get_trend(df: pd.DataFrame) -> str:
         return "down"
     return "neutral"
 
-def check_smc_setup(df: pd.DataFrame, htf_trend: str) -> dict:
+def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = None) -> dict:
     """
     Kiểm tra tín hiệu SMC trên DataFrame khung thời gian nhỏ (LTF).
+    
+    :param df: DataFrame của khung thời gian LTF (15m)
+    :param htf_trend: Xu hướng từ khung thời gian cao (HTF) - "up", "down", hoặc "neutral"
+    :param htf_timeframes: Danh sách các khung HTF đã xác nhận trend (ví dụ: ["4h", "1d"])
     """
     if len(df) < 50:
         return None
@@ -93,10 +97,37 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str) -> dict:
             sl = sweep_candle['low'] * 0.999
             tp = entry_price + ((entry_price - sl) * 2)
             
+            # Xây dựng lý do chi tiết
+            htf_info = f"Xu hướng HTF ({', '.join(htf_timeframes).upper() if htf_timeframes else 'HTF'}) tăng" if htf_timeframes else "Xu hướng HTF tăng"
+            
+            # Lấy datetime nếu có
+            sweep_date_str = ""
+            mss_date_str = ""
+            try:
+                if 'datetime' in df.columns and hasattr(sweep_candle, 'name'):
+                    sweep_dt = df.loc[sweep_candle.name, 'datetime']
+                    if pd.notna(sweep_dt):
+                        sweep_date_str = f" ({sweep_dt.strftime('%Y-%m-%d %H:%M')})"
+            except:
+                pass
+            try:
+                if 'datetime' in df.columns and hasattr(mss_candle, 'name'):
+                    mss_dt = df.loc[mss_candle.name, 'datetime']
+                    if pd.notna(mss_dt):
+                        mss_date_str = f" ({mss_dt.strftime('%Y-%m-%d %H:%M')})"
+            except:
+                pass
+            
+            reason = (
+                f"{htf_info}. Có Liquidity Sweep kèm RSI quá bán ({sweep_candle['rsi']:.0f}) tại đáy {last_swing_low_val:.2f}"
+                f"{sweep_date_str}. Phá vỡ cấu trúc (MSS) kèm Volume đột biến tại {target_high_val:.2f}"
+                f"{mss_date_str}. Chạm lại vùng FVG tăng giá ({fvg['bottom']:.2f}-{fvg['top']:.2f})."
+            )
+            
             signal = {
                 'type': 'LONG',
                 'entry': entry_price, 'sl': sl, 'tp': tp,
-                'reason': f"HTF Tăng, LTF Tăng. Quét đáy {last_swing_low_val:.2f} (RSI {sweep_candle['rsi']:.0f}). Phá vỡ đỉnh {target_high_val:.2f} với Volume cao. Hồi về FVG ({fvg['bottom']:.2f}-{fvg['top']:.2f})."
+                'reason': reason
             }
             
     # === KIỂM TRA SHORT SETUP ===
@@ -160,10 +191,37 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str) -> dict:
             sl = sweep_candle['high'] * 1.001
             tp = entry_price - ((sl - entry_price) * 2)
             
+            # Xây dựng lý do chi tiết
+            htf_info = f"Xu hướng HTF ({', '.join(htf_timeframes).upper() if htf_timeframes else 'HTF'}) giảm" if htf_timeframes else "Xu hướng HTF giảm"
+            
+            # Lấy datetime nếu có
+            sweep_date_str = ""
+            mss_date_str = ""
+            try:
+                if 'datetime' in df.columns and hasattr(sweep_candle, 'name'):
+                    sweep_dt = df.loc[sweep_candle.name, 'datetime']
+                    if pd.notna(sweep_dt):
+                        sweep_date_str = f" ({sweep_dt.strftime('%Y-%m-%d %H:%M')})"
+            except:
+                pass
+            try:
+                if 'datetime' in df.columns and hasattr(mss_candle, 'name'):
+                    mss_dt = df.loc[mss_candle.name, 'datetime']
+                    if pd.notna(mss_dt):
+                        mss_date_str = f" ({mss_dt.strftime('%Y-%m-%d %H:%M')})"
+            except:
+                pass
+            
+            reason = (
+                f"{htf_info}. Có Liquidity Sweep kèm RSI quá mua ({sweep_candle['rsi']:.0f}) tại đỉnh {last_swing_high_val:.2f}"
+                f"{sweep_date_str}. Phá vỡ cấu trúc (MSS) kèm Volume đột biến tại {target_low_val:.2f}"
+                f"{mss_date_str}. Chạm lại vùng FVG giảm giá ({fvg['bottom']:.2f}-{fvg['top']:.2f})."
+            )
+            
             signal = {
                 'type': 'SHORT',
                 'entry': entry_price, 'sl': sl, 'tp': tp,
-                'reason': f"HTF Giảm, LTF Giảm. Quét đỉnh {last_swing_high_val:.2f} (RSI {sweep_candle['rsi']:.0f}). Phá vỡ đáy {target_low_val:.2f} với Volume cao. Hồi về FVG ({fvg['bottom']:.2f}-{fvg['top']:.2f})."
+                'reason': reason
             }
             
     return signal

@@ -118,14 +118,25 @@ def handle_signal(symbol, timeframe, signal, df_trigger, state, new_alerts, new_
         tp_pct = abs(tp - entry) / entry * 100
         sl_pct = abs(entry - sl) / entry * 100
         
+        # Trích xuất điểm tự tin nếu có (dành cho SMC)
+        score_str = ""
+        if 'score' in signal and 'conf_label' in signal:
+            score = signal['score']
+            stars = "⭐" * (score // 2 + 1) if score > 0 else "⭐"
+            score_str = (
+                f"\n🎯 *Điểm Tự Tin:* {stars} ({score}/10)\n"
+                f"🏷️ *Phân Loại:* `{signal['conf_label']}`\n"
+            )
+            
         msg = (
             f"🚨 *{signal['type']}*\n"
             f"Cặp giao dịch: `{symbol}`\n"
             f"Khung thời gian: `{timeframe}`\n"
             f"Entry: `{entry:.5f}`\n"
             f"Stop Loss: `{sl:.5f}` ({sl_pct:.2f}%)\n"
-            f"Take Profit: `{tp:.5f}` ({tp_pct:.2f}%)\n\n"
-            f"📖 *Lý do vào lệnh:*\n"
+            f"Take Profit: `{tp:.5f}` ({tp_pct:.2f}%)\n"
+            f"{score_str}"
+            f"\n📖 *Lý do vào lệnh:*\n"
             f"{signal['reason']}"
         )
         send_alert(msg)

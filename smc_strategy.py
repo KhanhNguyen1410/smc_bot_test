@@ -209,16 +209,58 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, df_4h: pd.DataFrame = None
             except:
                 pass
             
+            # --- TÍNH ĐIỂM CONFIDENCE SCORE (Max 10đ) ---
+            score = 0
+            # 1. HTF Confluence (Max 4đ)
+            if in_htf_poi:
+                score += 4
+            elif htf_trend == ltf_trend: # Đồng thuận xu hướng
+                score += 2
+                
+            # 2. Động lượng & Dòng tiền (Max 3đ)
+            vol_ratio = mss_candle['volume'] / mss_candle['volume_sma_20']
+            if vol_ratio > 2.0:
+                score += 2
+            elif vol_ratio > 1.5:
+                score += 1
+                
+            if sweep_candle['rsi'] < 30: # Quá bán cực đại
+                score += 1
+                
+            # 3. Hành vi giá & R:R (Max 3đ)
+            sweep_body = abs(sweep_candle['close'] - sweep_candle['open'])
+            sweep_lower_wick = min(sweep_candle['open'], sweep_candle['close']) - sweep_candle['low']
+            if sweep_body > 0:
+                if sweep_lower_wick / sweep_body > 3.0:
+                    score += 2
+                elif sweep_lower_wick / sweep_body > 2.0:
+                    score += 1
+                    
+            rr_ratio = abs(tp - entry_price) / abs(entry_price - sl)
+            if rr_ratio >= 3.0:
+                score += 1
+                
+            # Phân loại độ tin cậy
+            if score >= 7:
+                conf_label = "🔥 HIGH CONFIDENCE"
+            elif score >= 4:
+                conf_label = "⚡ MEDIUM CONFIDENCE"
+            else:
+                conf_label = "❄️ LOW CONFIDENCE"
+            # --------------------------------------------
+            
             reason = (
-                f"{htf_info}. Có Liquidity Sweep kèm RSI quá bán ({sweep_candle['rsi']:.0f}) tại đáy {last_swing_low_val:.2f}"
+                f"{htf_info}{htf_poi_info}. Có Liquidity Sweep kèm RSI quá bán ({sweep_candle['rsi']:.0f}) tại đáy {last_swing_low_val:.2f}"
                 f"{sweep_date_str}. Phá vỡ cấu trúc (MSS) kèm Volume đột biến tại {target_high_val:.2f}"
-                f"{mss_date_str}. Chạm lại vùng FVG tăng giá ({fvg['bottom']:.2f}-{fvg['top']:.2f})."
+                f"{mss_date_str}. Chạm lại vùng FVG tăng giá ({fvg['top']:.2f}-{fvg['bottom']:.2f})."
             )
             
             signal = {
                 'type': 'LONG',
                 'entry': entry_price, 'sl': sl, 'tp': tp,
-                'reason': reason
+                'reason': reason,
+                'score': score,
+                'conf_label': conf_label
             }
             
     # === KIỂM TRA SHORT SETUP ===
@@ -319,19 +361,58 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, df_4h: pd.DataFrame = None
             except:
                 pass
             
+            # --- TÍNH ĐIỂM CONFIDENCE SCORE (Max 10đ) ---
+            score = 0
+            # 1. HTF Confluence (Max 4đ)
+            if in_htf_poi:
+                score += 4
+            elif htf_trend == ltf_trend: # Đồng thuận xu hướng
+                score += 2
+                
+            # 2. Động lượng & Dòng tiền (Max 3đ)
+            vol_ratio = mss_candle['volume'] / mss_candle['volume_sma_20']
+            if vol_ratio > 2.0:
+                score += 2
+            elif vol_ratio > 1.5:
+                score += 1
+                
+            if sweep_candle['rsi'] > 70: # Quá mua cực đại
+                score += 1
+                
+            # 3. Hành vi giá & R:R (Max 3đ)
+            sweep_body = abs(sweep_candle['close'] - sweep_candle['open'])
+            sweep_upper_wick = sweep_candle['high'] - max(sweep_candle['open'], sweep_candle['close'])
+            if sweep_body > 0:
+                if sweep_upper_wick / sweep_body > 3.0:
+                    score += 2
+                elif sweep_upper_wick / sweep_body > 2.0:
+                    score += 1
+                    
+            rr_ratio = abs(entry_price - tp) / abs(sl - entry_price)
+            if rr_ratio >= 3.0:
+                score += 1
+                
+            # Phân loại độ tin cậy
+            if score >= 7:
+                conf_label = "🔥 HIGH CONFIDENCE"
+            elif score >= 4:
+                conf_label = "⚡ MEDIUM CONFIDENCE"
+            else:
+                conf_label = "❄️ LOW CONFIDENCE"
+            # --------------------------------------------
+            
             reason = (
                 f"{htf_info}{htf_poi_info}. Có Liquidity Sweep kèm RSI quá mua ({sweep_candle['rsi']:.0f}) tại đỉnh {last_swing_high_val:.2f}"
                 f"{sweep_date_str}. Phá vỡ cấu trúc (MSS) kèm Volume đột biến tại {target_low_val:.2f}"
                 f"{mss_date_str}. Chạm lại vùng FVG giảm giá ({fvg['bottom']:.2f}-{fvg['top']:.2f})."
             )
             
-            if in_htf_poi:
-                reason = "🔥 [HTF POI MATCHED] " + reason
-            
             signal = {
                 'type': 'SHORT',
                 'entry': entry_price, 'sl': sl, 'tp': tp,
-                'reason': reason
+                'reason': reason,
+                'score': score,
+                'conf_label': conf_label
             }
             
     return signal

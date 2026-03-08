@@ -27,19 +27,23 @@ def check_bollinger_setup(df_1h: pd.DataFrame, df_15m: pd.DataFrame) -> dict:
                 # Setup LONG chuẩn
                 entry_price = last_15m['close']
                 
-                # SL: Cắt lỗ dưới cái râu sâu nhất của cụm 15m này 1 chút xíu
-                sl = min(last_15m['low'], prev_15m['low'], setup_15m['low']) * 0.999 
+                # TP: Mặc định tối thiểu 2.0% từ entry
+                tp = entry_price * 1.02
                 
-                # TP: Lướt sóng cố định 1.5% từ entry
-                tp = entry_price * 1.015
+                # SL: Cắt lỗ dưới cái râu sâu nhất của cụm 15m này. Nới thêm nếu quá chật.
+                raw_sl = min(last_15m['low'], prev_15m['low'], setup_15m['low']) * 0.999 
                 
-                # Tính Risk (Rủi ro %): Nới SL tối đa 2.0% cho biên TP 1.5%.
+                # Đảm bảo Risk Reward tối thiểu 1:1, tức là SL không được kéo quá xa
+                max_loss_allowed = entry_price * 0.98 # Giới hạn thua lỗ 2.0%
+                sl = max(raw_sl, max_loss_allowed)
+                
+                # Tính Risk (Rủi ro %): Nới SL tối đa 2.5% cho biên TP 2.0%.
                 risk_pct = (entry_price - sl) / entry_price
-                if risk_pct > 0 and risk_pct <= 0.02:
+                if risk_pct > 0 and risk_pct <= 0.025:
                     signal = {
                         'type': 'SCALP BOLLINGER LONG (1H/15M)',
                         'entry': entry_price, 'sl': sl, 'tp': tp,
-                        'reason': f"Khung 1H kiệt sức ngoài BB Lower ({last_1h['bb_lower']:.2f}) & RSI quá bán ({last_1h['rsi']:.0f}). Khung 15M xuất hiện nến xanh đảo chiều phá đỉnh nến trước ({prev_15m['high']:.2f}). Đặt mục tiêu chốt nhanh 1.5%."
+                        'reason': f"Khung 1H kiệt sức ngoài BB Lower ({last_1h['bb_lower']:.2f}) & RSI quá bán ({last_1h['rsi']:.0f}). Khung 15M xuất hiện nến xanh đảo chiều. Đặt mục tiêu chốt tối thiểu 2.0%."
                     }
                     return signal
 
@@ -54,19 +58,23 @@ def check_bollinger_setup(df_1h: pd.DataFrame, df_15m: pd.DataFrame) -> dict:
                 # Setup SHORT chuẩn
                 entry_price = last_15m['close']
                 
-                # SL: Cắt lỗ trên cụm râu cao nhất của cụm 15m xíu xiu
-                sl = max(last_15m['high'], prev_15m['high'], setup_15m['high']) * 1.001
+                # TP: Mặc định tối thiểu 2.0% từ entry
+                tp = entry_price * 0.98
                 
-                # TP: Lướt sóng cố định 1.5% từ entry
-                tp = entry_price * 0.985
+                # SL: Cắt lỗ trên cụm râu cao nhất của cụm 15m.
+                raw_sl = max(last_15m['high'], prev_15m['high'], setup_15m['high']) * 1.001
+                
+                # Đảm bảo Risk Reward tối thiểu 1:1
+                max_loss_allowed = entry_price * 1.02 # Giới hạn thua lỗ 2.0%
+                sl = min(raw_sl, max_loss_allowed)
                 
                 # Tính Risk (Rủi ro %)
                 risk_pct = (sl - entry_price) / entry_price
-                if risk_pct > 0 and risk_pct <= 0.02:
+                if risk_pct > 0 and risk_pct <= 0.025:
                     signal = {
                         'type': 'SCALP BOLLINGER SHORT (1H/15M)',
                         'entry': entry_price, 'sl': sl, 'tp': tp,
-                        'reason': f"Khung 1H đẩy vượt BB Upper ({last_1h['bb_upper']:.2f}) & RSI quá mua ({last_1h['rsi']:.0f}). Khung 15M xuất hiện nến xả đảo chiều phá đáy nến trước ({prev_15m['low']:.2f}). Đặt mục tiêu chốt nhanh 1.5%."
+                        'reason': f"Khung 1H đẩy vượt BB Upper ({last_1h['bb_upper']:.2f}) & RSI quá mua ({last_1h['rsi']:.0f}). Khung 15M xuất hiện nến xả đảo chiều. Đặt mục tiêu chốt tối thiểu 2.0%."
                     }
                     return signal
                     

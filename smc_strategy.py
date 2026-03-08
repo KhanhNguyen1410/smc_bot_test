@@ -105,6 +105,12 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
             sl = sweep_candle['low'] * 0.999
             tp = entry_price + ((entry_price - sl) * 2)
             
+            # Đảm bảo TP lớn hơn hoặc bằng 2.0%
+            min_tp_price = entry_price * 1.02
+            if tp < min_tp_price:
+                tp = min_tp_price
+                sl = entry_price - ((tp - entry_price) / 2) # Nới SL để giữ nguyên RR 1:2
+            
             # Xây dựng lý do chi tiết
             htf_info = f"Xu hướng HTF ({', '.join(htf_timeframes).upper() if htf_timeframes else 'HTF'}) tăng" if htf_timeframes else "Xu hướng HTF tăng"
             
@@ -208,6 +214,12 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
             entry_price = (fvg['top'] + fvg['bottom']) / 2
             sl = sweep_candle['high'] * 1.001
             tp = entry_price - ((sl - entry_price) * 2)
+            
+            # Đảm bảo TP lớn hơn hoặc bằng 2.0%
+            min_tp_price = entry_price * 0.98
+            if tp > min_tp_price:
+                tp = min_tp_price
+                sl = entry_price + ((entry_price - tp) / 2) # Nới SL để giữ nguyên RR 1:2
             
             # Xây dựng lý do chi tiết
             htf_info = f"Xu hướng HTF ({', '.join(htf_timeframes).upper() if htf_timeframes else 'HTF'}) giảm" if htf_timeframes else "Xu hướng HTF giảm"

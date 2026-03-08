@@ -16,13 +16,11 @@
         "OPUSDT",
         "ARBUSDT",
         "INJUSDT",
-        "RNDRUSDT",
         "FETUSDT",
         "SUIUSDT"
     ],
     "timeframes": {
         "ltf": [
-            "5m",
             "15m",
             "1h"
         ],

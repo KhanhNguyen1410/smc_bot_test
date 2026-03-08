@@ -73,6 +73,12 @@ def check_pinbar_engulfing(df: pd.DataFrame):
             sl = current_candle['low'] - (current_candle['high'] - current_candle['low']) * 0.1
             tp = entry + (entry - sl) * 2 # RR 1:2
             
+            # Đảm bảo TP lớn hơn hoặc bằng 2.0%
+            min_tp_price = entry * 1.02
+            if tp < min_tp_price:
+                tp = min_tp_price
+                sl = entry - ((tp - entry) / 2) # Nới SL để giữ nguyên RR 1:2
+            
             pattern_name = "Bullish Pinbar" if is_bullish_pinbar else "Bullish Engulfing"
             return {
                 "type": "PRICE ACTION - LONG (Reversal)",
@@ -87,6 +93,12 @@ def check_pinbar_engulfing(df: pd.DataFrame):
             entry = current_candle['close']
             sl = current_candle['high'] + (current_candle['high'] - current_candle['low']) * 0.1
             tp = entry - (sl - entry) * 2 # RR 1:2
+            
+            # Đảm bảo TP lớn hơn hoặc bằng 2.0%
+            min_tp_price = entry * 0.98
+            if tp > min_tp_price:
+                tp = min_tp_price
+                sl = entry + ((entry - tp) / 2) # Nới SL để giữ nguyên RR 1:2
             
             pattern_name = "Bearish Pinbar" if is_bearish_pinbar else "Bearish Engulfing"
             return {
@@ -121,30 +133,47 @@ def check_inside_bar(df: pd.DataFrame):
     if not is_inside_bar:
         return None
         
-    # Điều kiện Breakout Up
+    # Điều kiện Breakout Up kèm Volume nổ
     if bo['close'] > mb['high']:
+        # Lọc nhiễu: Volume cây breakout phải lớn hơn volume trung bình 20 phiên x 1.2
+        if 'volume_sma_20' in bo and bo['volume'] < bo['volume_sma_20'] * 1.2:
+            return None
+            
         entry = bo['close']
         sl = mb['low'] # SL dưới nến mẹ cho an toàn
         tp = entry + (entry - sl) * 1.5 # RR 1:1.5 vì mô hình này thường SL khá dài
+        
+        min_tp_price = entry * 1.02 # Tối thiểu 2%
+        if tp < min_tp_price:
+            tp = min_tp_price
+            sl = entry - ((tp - entry) / 1.5)
         return {
             "type": "PRICE ACTION - LONG (Inside Bar Breakout)",
             "entry": entry,
             "sl": sl,
             "tp": tp,
-            "reason": f"Giá phá vỡ lên trên cụm nến nén chặt (Inside Bar)."
+            "reason": f"Giá phá vỡ lên cụm nến nén chặt (Inside Bar) với Volume đột biến."
         }
         
-    # Điều kiện Breakout Down
+    # Điều kiện Breakout Down kèm Volume nổ
     if bo['close'] < mb['low']:
+        if 'volume_sma_20' in bo and bo['volume'] < bo['volume_sma_20'] * 1.2:
+            return None
+            
         entry = bo['close']
         sl = mb['high']
         tp = entry - (sl - entry) * 1.5
+        
+        min_tp_price = entry * 0.98 # Tối thiểu 2%
+        if tp > min_tp_price:
+            tp = min_tp_price
+            sl = entry + ((entry - tp) / 1.5)
         return {
             "type": "PRICE ACTION - SHORT (Inside Bar Breakout)",
             "entry": entry,
             "sl": sl,
             "tp": tp,
-            "reason": f"Giá phá vỡ xuống dưới cụm nến nén chặt (Inside Bar)."
+            "reason": f"Giá phá vỡ xuống cụm nến nén chặt (Inside Bar) với Volume đột biến."
         }
         
     return None
@@ -152,59 +181,103 @@ def check_inside_bar(df: pd.DataFrame):
 def check_breakout_retest(df: pd.DataFrame):
     """
     Tìm setup Phá vỡ đỉnh/đáy rồi quay lại test (Retest).
-    Logic thu gọn: Nhìn lại N cây nến trước để kiếm đỉnh cao nhất (Kháng cự).
-    Nếu giá từng phá vỡ Kháng cự này, rồi bây giờ Nến hiện tại đang chạm lại Kháng cự cũ (trở thành Hỗ trợ) từ trên xuống và rút râu.
+    Đã nâng cấp 4 màng lọc nhiễu: Volume Breakout, Momentum Body, Pinbar Retest và thuận EMA.
     """
     if len(df) < 30:
         return None
         
-    # Tìm mức cản cao nhất và thấp nhất trong vùng quá khứ [30 nến đến 5 nến trước]
     past_df = df.iloc[-30:-5]
-    recent_df = df.iloc[-5:-1] # Các nến gần nhất (phá vỡ và quay lại)
-    current_candle = df.iloc[-1]
+    recent_df = df.iloc[-5:-1] # Các nến gần nhất (chứa nến Breakout)
+    current_candle = df.iloc[-1] # Nến Retest
     
     res_level = past_df['high'].max()
     sup_level = past_df['low'].min()
+    ema50 = current_candle['ema_50'] if 'ema_50' in current_candle else None
     
     # 1. Long B&R
-    # Điều kiện: Đã có nến Breakout đóng cửa trên cản (res_level) trong 4 nến gần nhất
-    has_breakout_up = any(recent_df['close'] > res_level)
-    # Và hiện tại giá thoái lui về chạm lại vùng cản cũ (bây giờ là Hỗ trợ) và đang giữ giá trên đó
+    bo_up_candles = recent_df[recent_df['close'] > res_level]
+    valid_bo_up = False
+    
+    # Filter 1 & 2: Xác nhận Breakout bằng Volume (>1.2x SMA20) và Lực Nến (Thân > 60%)
+    if not bo_up_candles.empty:
+        for _, bo_candle in bo_up_candles.iterrows():
+            body = abs(bo_candle['close'] - bo_candle['open'])
+            total = bo_candle['high'] - bo_candle['low']
+            
+            vol_ok = 'volume_sma_20' not in bo_candle or pd.isna(bo_candle['volume_sma_20']) or bo_candle['volume'] > bo_candle['volume_sma_20'] * 1.2
+            mom_ok = total > 0 and (body / total) > 0.6
+            if vol_ok and mom_ok:
+                valid_bo_up = True
+                break
+                
+    # Filter 3 & 4: Nến Retest chạm cản tạo mô hình Pinbar và thuận EMA50
     retesting_res = (current_candle['low'] <= res_level) and (current_candle['close'] > res_level)
     
-    if has_breakout_up and retesting_res:
-        # Check xem thân nến hoặc râu dưới có dội lên không (Rút châm)
+    if valid_bo_up and retesting_res:
+        trend_ok = ema50 is None or pd.isna(ema50) or current_candle['close'] > ema50
+        
+        body_size = abs(current_candle['open'] - current_candle['close'])
         lower_wick = min(current_candle['open'], current_candle['close']) - current_candle['low']
-        if lower_wick > 0: # Có phản ứng dội
+        rejection_ok = lower_wick >= 1.5 * body_size and lower_wick > 0 # Rút râu mạnh
+        
+        if trend_ok and rejection_ok:
             entry = current_candle['close']
             sl = current_candle['low'] - (current_candle['high'] - current_candle['low']) * 0.5
             tp = entry + (entry - sl) * 2
+            
+            min_tp_price = entry * 1.02 # Tối thiểu 2%
+            if tp < min_tp_price:
+                tp = min_tp_price
+                sl = entry - ((tp - entry) / 2)
             
             return {
                 "type": "PRICE ACTION - LONG (Breakout & Retest)",
                 "entry": entry,
                 "sl": sl,
                 "tp": tp,
-                "reason": f"Giá phá vỡ đỉnh cũ tại {res_level:.4f} sau đó quay lại Retest thành công."
+                "reason": f"Phá vỡ đỉnh {res_level:.4f} với Volume & Lực nến tốt. Retest thành công tạo Pinbar thuận xu hướng."
             }
 
     # 2. Short B&R
-    has_breakout_down = any(recent_df['close'] < sup_level)
+    bo_down_candles = recent_df[recent_df['close'] < sup_level]
+    valid_bo_down = False
+    
+    if not bo_down_candles.empty:
+        for _, bo_candle in bo_down_candles.iterrows():
+            body = abs(bo_candle['close'] - bo_candle['open'])
+            total = bo_candle['high'] - bo_candle['low']
+            
+            vol_ok = 'volume_sma_20' not in bo_candle or pd.isna(bo_candle['volume_sma_20']) or bo_candle['volume'] > bo_candle['volume_sma_20'] * 1.2
+            mom_ok = total > 0 and (body / total) > 0.6
+            if vol_ok and mom_ok:
+                valid_bo_down = True
+                break
+                
     retesting_sup = (current_candle['high'] >= sup_level) and (current_candle['close'] < sup_level)
     
-    if has_breakout_down and retesting_sup:
+    if valid_bo_down and retesting_sup:
+        trend_ok = ema50 is None or pd.isna(ema50) or current_candle['close'] < ema50
+        
+        body_size = abs(current_candle['open'] - current_candle['close'])
         upper_wick = current_candle['high'] - max(current_candle['open'], current_candle['close'])
-        if upper_wick > 0:
+        rejection_ok = upper_wick >= 1.5 * body_size and upper_wick > 0
+        
+        if trend_ok and rejection_ok:
             entry = current_candle['close']
             sl = current_candle['high'] + (current_candle['high'] - current_candle['low']) * 0.5
             tp = entry - (sl - entry) * 2
+            
+            min_tp_price = entry * 0.98 # Tối thiểu 2%
+            if tp > min_tp_price:
+                tp = min_tp_price
+                sl = entry + ((entry - tp) / 2)
             
             return {
                 "type": "PRICE ACTION - SHORT (Breakout & Retest)",
                 "entry": entry,
                 "sl": sl,
                 "tp": tp,
-                "reason": f"Giá phá vỡ đáy cũ tại {sup_level:.4f} sau đó quay lại Retest thành công."
+                "reason": f"Phá vỡ đáy {sup_level:.4f} với Volume & Lực nến tốt. Retest thành công tạo Pinbar thuận xu hướng."
             }
 
     return None

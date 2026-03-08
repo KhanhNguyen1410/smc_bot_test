@@ -1,0 +1,11 @@
+app = "smc-scanner-bot"
+primary_region = "sin" # Singapore region for better latency, or use your preferred
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PYTHONUNBUFFERED = "1"
+  PYTHONIOENCODING = "utf-8"
+
+# No [http_service] section since this is a background worker without web endpoints

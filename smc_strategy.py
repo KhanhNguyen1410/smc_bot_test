@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 def get_trend(df: pd.DataFrame) -> str:
     """Trả về xu hướng hiện tại dựa trên EMA50 và EMA200"""
@@ -45,8 +46,12 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
         if post_swing_df.empty:
             return None
             
+        # Tính toán Body và Lower Wick để check Wick Rejection
+        body = (post_swing_df['close'] - post_swing_df['open']).abs()
+        lower_wick = np.minimum(post_swing_df['open'], post_swing_df['close']) - post_swing_df['low']
+        
         # Tìm nến Sweep bằng mảng logic (Vectorized)
-        sweep_mask = (post_swing_df['low'] < last_swing_low_val) & (post_swing_df['close'] > last_swing_low_val) & (post_swing_df['rsi'] <= 40)
+        sweep_mask = (post_swing_df['low'] < last_swing_low_val) & (post_swing_df['close'] > last_swing_low_val) & (post_swing_df['rsi'] <= 40) & (lower_wick > body * 2)
         valid_sweeps = post_swing_df[sweep_mask]
         if valid_sweeps.empty:
             return None
@@ -66,7 +71,7 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
             return None
             
         # Tìm nến MSS bằng mảng logic (Vectorized)
-        mss_mask = (post_sweep_df['close'] > target_high_val) & (post_sweep_df['volume'] > post_sweep_df['volume_sma_20'])
+        mss_mask = (post_sweep_df['close'] > target_high_val) & (post_sweep_df['volume'] > post_sweep_df['volume_sma_20'] * 1.5)
         valid_mss = post_sweep_df[mss_mask]
         
         if valid_mss.empty:
@@ -147,8 +152,12 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
         if post_swing_df.empty:
             return None
             
+        # Tính toán Body và Upper Wick để check Wick Rejection
+        body = (post_swing_df['close'] - post_swing_df['open']).abs()
+        upper_wick = post_swing_df['high'] - np.maximum(post_swing_df['open'], post_swing_df['close'])
+        
         # Tìm nến Sweep bằng mảng logic (Vectorized)
-        sweep_mask = (post_swing_df['high'] > last_swing_high_val) & (post_swing_df['close'] < last_swing_high_val) & (post_swing_df['rsi'] >= 60)
+        sweep_mask = (post_swing_df['high'] > last_swing_high_val) & (post_swing_df['close'] < last_swing_high_val) & (post_swing_df['rsi'] >= 60) & (upper_wick > body * 2)
         valid_sweeps = post_swing_df[sweep_mask]
         
         if valid_sweeps.empty:
@@ -168,7 +177,7 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
             return None
             
         # Tìm nến MSS bằng mảng logic (Vectorized)
-        mss_mask = (post_sweep_df['close'] < target_low_val) & (post_sweep_df['volume'] > post_sweep_df['volume_sma_20'])
+        mss_mask = (post_sweep_df['close'] < target_low_val) & (post_sweep_df['volume'] > post_sweep_df['volume_sma_20'] * 1.5)
         valid_mss = post_sweep_df[mss_mask]
         
         if valid_mss.empty:

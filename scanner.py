@@ -49,6 +49,19 @@ def scan_markets():
         for future in concurrent.futures.as_completed(futures):
             signals_found += future.result()
             
+    print(f"Đã hoàn tất 1 chu kỳ quét. Tổng số tín hiệu tìm được: {signals_found}\n")
+    
+    # Logic kiểm tra Heartbeat (Báo cáo sinh tồn)
+    state = load_state()
+    state["run_count"] += 1
+    heartbeat_runs = config.get("heartbeat_interval_runs", 10)
+    
+    if state["run_count"] >= heartbeat_runs:
+        send_alert(f"🟢 *BOT HEARTBEAT*\nSMC Scanner vẫn đang chạy bình thường.\nĐã hoàn thành {state['run_count']} chu kỳ quét kể từ lần báo cáo trước.")
+        state["run_count"] = 0 # reset biến đếm
+        
+    save_state(state)
+
 def process_symbol(symbol, config):
     signals_found = 0
     tfs = config.get("timeframes", {})
@@ -136,19 +149,5 @@ def process_symbol(symbol, config):
             send_alert(msg)
             
     return signals_found
-            
-    print("Đã hoàn tất 1 chu kỳ quét.\n")
-    
-    # Logic kiểm tra Heartbeat (Báo cáo sinh tồn)
-    state = load_state()
-    state["run_count"] += 1
-    heartbeat_runs = config.get("heartbeat_interval_runs", 10)
-    
-    if state["run_count"] >= heartbeat_runs:
-        send_alert(f"🟢 *BOT HEARTBEAT*\nSMC Scanner vẫn đang chạy bình thường.\nĐã hoàn thành {state['run_count']} chu kỳ quét kể từ lần báo cáo trước.")
-        state["run_count"] = 0 # reset biến đếm
-        
-    save_state(state)
-
 if __name__ == "__main__":
     scan_markets()

@@ -8,6 +8,7 @@ from smc_strategy import get_trend, check_smc_setup
 from bollinger_strategy import check_bollinger_setup
 from price_action_strategy import check_pa_setup, check_htf_support_resistance
 from telegram_bot import send_alert
+from news_api import get_high_impact_news, check_upcoming_news
 
 def load_config():
     with open(os.path.join(os.path.dirname(__file__), 'config.json'), 'r') as f:
@@ -138,7 +139,33 @@ def scan_markets():
     max_workers = min(10, len(symbols)) # tối đa 10 luồng
     
     state = load_state()
-    # Kiểm tra các lệnh đang mở trước
+    
+    # 0. Kiểm tra tin tức Vĩ Mô (Macroeconomic News)
+    try:
+        news_events = get_high_impact_news()
+        upcoming = check_upcoming_news(news_events, minutes_ahead=35) # Cảnh báo trước tối đa 35 phút
+        
+        alerted_news = state.get("alerted_news", [])
+        
+        for news in upcoming:
+            news_id = news['id']
+            if news_id not in alerted_news:
+                msg = (
+                    f"⚠️ *CẢNH BÁO TIN TỨC VĨ MÔ*\n"
+                    f"Sắp diễn ra tin ĐỎ (High Impact) tác động mạnh tới USD:\n\n"
+                    f"🔴 *{news['event']}*\n"
+                    f"⏰ Thời gian: `{news['time_str']}`\n\n"
+                    f"👉 *Khuyến nghị:* Hãy cẩn thận rủi ro biến động giật cản (fakeout) hoặc dãn spread. Cân nhắc không vào lệnh mới lúc này."
+                )
+                send_alert(msg)
+                alerted_news.append(news_id)
+                
+        # Giữ lại tối đa 50 tin để file state không bị quá dài
+        state["alerted_news"] = alerted_news[-50:]
+    except Exception as e:
+        print(f"Lỗi khi check tin tức: {e}")
+
+    # 1. Kiểm tra các lệnh đang mở trước
     check_active_positions(state)
     
     alerted_signals = state.get("alerted_signals", {})

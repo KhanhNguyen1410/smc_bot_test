@@ -12,12 +12,69 @@ def get_trend(df: pd.DataFrame) -> str:
         return "down"
     return "neutral"
 
-def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = None) -> dict:
+def identify_order_blocks(df: pd.DataFrame, trend: str) -> list:
+    """
+    Xác định các vùng Order Block (OB) chưa bị mitigate.
+    - OB Tăng (Demand): Cây nến giảm cuối cùng trước đợt sóng tăng phá vỡ đỉnh (Swing High).
+    - OB Giảm (Supply): Cây nến tăng cuối cùng trước đợt sóng giảm phá vỡ đáy (Swing Low).
+    """
+    obs = []
+    if len(df) < 50:
+        return obs
+        
+    # Lấy 50 nến gần nhất để tối ưu hiệu suất quét OB
+    recent_df = df.iloc[-50:]
+    
+    if trend == "up":
+        # Tìm Demand OB: Quá trình giá tạo Sweep/MSS rồi đi lên
+        swing_highs = recent_df[recent_df['swing_high'] == True]
+        for idx in swing_highs.index:
+            # Tìm đoạn giảm trước khi phá vỡ cái đỉnh này
+            pre_break_df = recent_df.loc[:idx].iloc[:-1]
+            if not pre_break_df.empty:
+                # Tìm cây nến đỏ cuối cùng (Bearish candle)
+                bear_candles = pre_break_df[pre_break_df['close'] < pre_break_df['open']]
+                if not bear_candles.empty:
+                    ob_candle = bear_candles.iloc[-1]
+                    # Vùng OB là râu trên và râu dưới của cây nến này
+                    top_ob = max(ob_candle['open'], ob_candle['close'])
+                    bottom_ob = ob_candle['low']
+                    
+                    # Kiểm tra xem từ đó tới nay giá đã mitigate (chạm lại) chưa
+                    post_ob_df = recent_df.loc[idx:]
+                    mitigated = (post_ob_df['low'] <= top_ob).any()
+                    
+                    if not mitigated:
+                        obs.append({'top': top_ob, 'bottom': bottom_ob, 'type': 'demand', 'time': ob_candle.name})
+                        
+    elif trend == "down":
+        # Tìm Supply OB
+        swing_lows = recent_df[recent_df['swing_low'] == True]
+        for idx in swing_lows.index:
+            pre_break_df = recent_df.loc[:idx].iloc[:-1]
+            if not pre_break_df.empty:
+                # Tìm cây nến xanh cuối cùng (Bullish candle)
+                bull_candles = pre_break_df[pre_break_df['close'] > pre_break_df['open']]
+                if not bull_candles.empty:
+                    ob_candle = bull_candles.iloc[-1]
+                    top_ob = ob_candle['high']
+                    bottom_ob = min(ob_candle['open'], ob_candle['close'])
+                    
+                    post_ob_df = recent_df.loc[idx:]
+                    mitigated = (post_ob_df['high'] >= bottom_ob).any()
+                    
+                    if not mitigated:
+                        obs.append({'top': top_ob, 'bottom': bottom_ob, 'type': 'supply', 'time': ob_candle.name})
+                        
+    return obs
+
+def check_smc_setup(df: pd.DataFrame, htf_trend: str, df_4h: pd.DataFrame = None, htf_timeframes: list = None) -> dict:
     """
     Kiểm tra tín hiệu SMC trên DataFrame khung thời gian nhỏ (LTF).
     
     :param df: DataFrame của khung thời gian LTF (15m)
     :param htf_trend: Xu hướng từ khung thời gian cao (HTF) - "up", "down", hoặc "neutral"
+    :param df_4h: Dữ liệu nến 4H để tìm Order Block HTF POI (nâng cao winrate)
     :param htf_timeframes: Danh sách các khung HTF đã xác nhận trend (ví dụ: ["4h", "1d"])
     """
     if len(df) < 50:
@@ -32,6 +89,26 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
         
     signal = None
     
+    # === HỢP LƯU HTF POI (Order Block) ===
+    in_htf_poi = False
+    htf_poi_info = ""
+    # Nếu có truyền df_4h vào, bot ưu tiên tìm Order Block HTF để lọc lệnh nhiễu.
+    if df_4h is not None and not df_4h.empty:
+        htf_obs = identify_order_blocks(df_4h, htf_trend)
+        current_price = last_candle['close']
+        
+        for ob in htf_obs:
+            if ob['type'] == 'demand' and ltf_trend == 'up':
+                if ob['bottom'] * 0.99 <= current_price <= ob['top'] * 1.01: # Cho phép sai số 1% quanh vùng OB
+                    in_htf_poi = True
+                    htf_poi_info = f" (Giá chạm HTF Demand OB: {ob['bottom']:.2f}-{ob['top']:.2f})"
+                    break
+            elif ob['type'] == 'supply' and ltf_trend == 'down':
+                if ob['bottom'] * 0.99 <= current_price <= ob['top'] * 1.01:
+                    in_htf_poi = True
+                    htf_poi_info = f" (Giá chạm HTF Supply OB: {ob['bottom']:.2f}-{ob['top']:.2f})"
+                    break
+                    
     # === KIỂM TRA LONG SETUP ===
     if ltf_trend == "up":
         recent_swing_lows = df[df['swing_low'] == True]
@@ -243,10 +320,13 @@ def check_smc_setup(df: pd.DataFrame, htf_trend: str, htf_timeframes: list = Non
                 pass
             
             reason = (
-                f"{htf_info}. Có Liquidity Sweep kèm RSI quá mua ({sweep_candle['rsi']:.0f}) tại đỉnh {last_swing_high_val:.2f}"
+                f"{htf_info}{htf_poi_info}. Có Liquidity Sweep kèm RSI quá mua ({sweep_candle['rsi']:.0f}) tại đỉnh {last_swing_high_val:.2f}"
                 f"{sweep_date_str}. Phá vỡ cấu trúc (MSS) kèm Volume đột biến tại {target_low_val:.2f}"
                 f"{mss_date_str}. Chạm lại vùng FVG giảm giá ({fvg['bottom']:.2f}-{fvg['top']:.2f})."
             )
+            
+            if in_htf_poi:
+                reason = "🔥 [HTF POI MATCHED] " + reason
             
             signal = {
                 'type': 'SHORT',

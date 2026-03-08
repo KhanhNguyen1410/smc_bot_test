@@ -49,23 +49,46 @@ def check_active_positions(state):
         recent_high = df['high'].max()
         recent_low = df['low'].min()
         
-        hit_tp = False
-        hit_sl = False
+        # Break-even Logic
+        break_even_triggered = pos.get('be_triggered', False)
+        entry_price = float(entry)
         
         if pos_type == "LONG":
-            if recent_low <= sl:
-                hit_sl = True
-            elif recent_high >= tp:
-                hit_tp = True
+            risk_dist = entry_price - float(sl)
+            be_target = entry_price + risk_dist # Mốc 1R
+            
+            # Check Break Even
+            if not break_even_triggered and recent_high >= be_target:
+                active_positions[sig_key]['sl'] = entry_price
+                active_positions[sig_key]['be_triggered'] = True
+                send_alert(f"🛡️ *CẬP NHẬT LỆNH*\nCặp: `{symbol}` (LONG)\nGiá đã chạy được 1R (+{risk_dist/entry_price*100:.2f}%).\n✅ *Đã dời Stop Loss về vùng giá Entry (Hòa vốn).*")
+                
+            # Check SL/TP
+            hit_sl = recent_low <= float(active_positions[sig_key]['sl'])
+            hit_tp = recent_high >= tp
+            
         else: # SHORT
-            if recent_high >= sl:
-                hit_sl = True
-            elif recent_low <= tp:
-                hit_tp = True
+            risk_dist = float(sl) - entry_price
+            be_target = entry_price - risk_dist # Mốc 1R
+            
+            # Check Break Even
+            if not break_even_triggered and recent_low <= be_target:
+                active_positions[sig_key]['sl'] = entry_price
+                active_positions[sig_key]['be_triggered'] = True
+                send_alert(f"🛡️ *CẬP NHẬT LỆNH*\nCặp: `{symbol}` (SHORT)\nGiá đã chạy được 1R (+{risk_dist/entry_price*100:.2f}%).\n✅ *Đã dời Stop Loss về vùng giá Entry (Hòa vốn).*")
+                
+            # Check SL/TP
+            hit_sl = recent_high >= float(active_positions[sig_key]['sl'])
+            hit_tp = recent_low <= tp
                 
         if hit_tp or hit_sl:
-            result = "🟢 Chốt Lời (TP)" if hit_tp else "🔴 Cắt Lỗ (SL)"
-            pct = abs(tp - entry)/entry*100 if hit_tp else abs(entry - sl)/entry*100
+            # Nếu chốt ở Entry (Hòa vốn)
+            if hit_sl and active_positions[sig_key]['be_triggered']:
+                result = "🛡️ Đóng Lệnh Hòa Vốn (Break-Even)"
+                pct = 0.0
+            else:
+                result = "🟢 Chốt Lời (TP)" if hit_tp else "🔴 Cắt Lỗ (SL)"
+                pct = abs(tp - entry)/entry*100 if hit_tp else abs(entry - float(active_positions[sig_key]['sl']))/entry*100
             
             msg = (
                 f"Lệnh *{pos_type}* `{symbol}` đã có kết quả:\n"
@@ -117,7 +140,8 @@ def handle_signal(symbol, timeframe, signal, df_trigger, state, new_alerts, new_
             "sl": sl,
             "tp": tp,
             "type": pos_type,
-            "time": trigger_time
+            "time": trigger_time,
+            "be_triggered": False
         }
         return 1
     return 0
@@ -250,6 +274,9 @@ def process_symbol(symbol, config, state):
     htf_trend_main = "neutral"
     htf_confirmed = []
     
+    # Giữ lại df khung 4H (hoặc khung lớn nhất) để đưa vào khối Order Block
+    df_htf_poi = None
+    
     for htf in htfs:
         df_htf = fetch_ohlcv(symbol, htf, limit=200)
         if df_htf.empty:
@@ -257,6 +284,10 @@ def process_symbol(symbol, config, state):
             
         df_htf = add_indicators(df_htf)
         trend = get_trend(df_htf)
+        
+        # Chọn khung lớn nhất (ví dụ 4H) làm HTF POI. Lưu lại DataFrame này.
+        if htf == '4h' or df_htf_poi is None:
+            df_htf_poi = df_htf
         
         signal_htf_pa = check_htf_support_resistance(df_htf)
         if signal_htf_pa:
@@ -287,7 +318,9 @@ def process_symbol(symbol, config, state):
             continue
             
         df_ltf = add_indicators(df_ltf)
-        signal_smc = check_smc_setup(df_ltf, htf_trend_main, htf_confirmed)
+        
+        # Pass df_ltf (15m), trend chính, df_htf_poi (4H) vào SMC
+        signal_smc = check_smc_setup(df_ltf, htf_trend_main, df_htf_poi, htf_confirmed)
         
         if signal_smc:
             sig_key = f"{symbol}_SMC_{ltf}"

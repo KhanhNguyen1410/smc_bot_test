@@ -8,6 +8,6 @@ primary_region = "sin"
   PYTHONUNBUFFERED = "1"
   PYTHONIOENCODING = "utf-8"
 
-# Cấu hình chạy Machine như một Cronjob (mỗi 15 phút tại phút 00, 15, 30, 45)
+# Cấu hình chạy Machine như một Cronjob (mỗi 15 phút tại phút 01, 16, 31, 46)
 [machine]
-  schedule = "0,15,30,45 * * * *"
+  schedule = "1,16,31,46 * * * *"

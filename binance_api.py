@@ -35,6 +35,9 @@ def fetch_ohlcv(symbol: str, interval: str, limit: int = 500) -> pd.DataFrame:
         numeric_cols = ['open', 'high', 'low', 'close', 'volume']
         df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric)
         
+        # Lọc bỏ cây nến cuối cùng (nến đang chạy chưa đóng cửa) để tránh tín hiệu fake
+        df = df.iloc[:-1]
+        
         return df[['datetime', 'open', 'high', 'low', 'close', 'volume']]
         
     except Exception as e:

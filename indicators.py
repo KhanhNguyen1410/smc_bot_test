@@ -6,7 +6,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     Tính toán các chỉ báo cho phân tích SMC: EMA50, EMA200, RSI(14), Volume SMA(20), 
     Bollinger Bands và Swing High/Low
     """
-    if len(df) < 200:
+    if len(df) < 100:
         return df
         
     df = df.copy()

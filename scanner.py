@@ -41,20 +41,29 @@ def scan_markets():
     # Sử dụng ThreadPoolExecutor để quét song song nhiều cặp coin cùng lúc
     max_workers = min(10, len(symbols)) # tối đa 10 luồng
     
+    state = load_state()
+    alerted_signals = state.get("alerted_signals", {})
+    
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         for symbol in symbols:
             # Submit each symbol to be processed concurrently
-            futures.append(executor.submit(process_symbol, symbol, config))
+            futures.append(executor.submit(process_symbol, symbol, config, alerted_signals))
             
+        new_alerts = {}
         for future in concurrent.futures.as_completed(futures):
-            signals_found += future.result()
+            sf, na = future.result()
+            signals_found += sf
+            new_alerts.update(na)
             
-    print(f"Đã hoàn tất 1 chu kỳ quét. Tổng số tín hiệu tìm được: {signals_found}\n")
+    # Cập nhật danh sách tín hiệu đã gửi
+    state["alerted_signals"] = alerted_signals
+    state["alerted_signals"].update(new_alerts)
+            
+    print(f"Đã hoàn tất 1 chu kỳ quét. Tổng số tín hiệu mới tìm được: {signals_found}\n")
     
     # Logic kiểm tra Heartbeat (Báo cáo sinh tồn)
-    state = load_state()
-    state["run_count"] += 1
+    state["run_count"] = state.get("run_count", 0) + 1
     heartbeat_runs = config.get("heartbeat_interval_runs", 10)
     
     if state["run_count"] >= heartbeat_runs:
@@ -63,8 +72,9 @@ def scan_markets():
         
     save_state(state)
 
-def process_symbol(symbol, config):
+def process_symbol(symbol, config, alerted_signals):
     signals_found = 0
+    new_alerts = {}
     tfs = config.get("timeframes", {})
     ltfs = tfs.get("ltf", ["15m"])
     if isinstance(ltfs, str):
@@ -85,18 +95,23 @@ def process_symbol(symbol, config):
         signal_bol = check_bollinger_setup(df_1h, df_15m)
         
         if signal_bol:
-            signals_found += 1
-            msg2 = (
-                f"🚨 *TÍN HIỆU {signal_bol['type']}*\n"
-                f"Cặp giao dịch: `{symbol}`\n"
-                f"Khung thời gian Entry: `15m` (Setup `1h`)\n"
-                f"Entry: `{signal_bol['entry']:.5f}`\n"
-                f"Stop Loss: `{signal_bol['sl']:.5f}`\n"
-                f"Take Profit: `{signal_bol['tp']:.5f}`\n\n"
-                f"📖 *Lý do vào lệnh:*\n"
-                f"{signal_bol['reason']}"
-            )
-            send_alert(msg2)
+            trigger_time = str(df_15m.iloc[-1]['datetime'])
+            sig_key = f"{symbol}_BOLLINGER_15m"
+            
+            if alerted_signals.get(sig_key) != trigger_time and new_alerts.get(sig_key) != trigger_time:
+                signals_found += 1
+                new_alerts[sig_key] = trigger_time
+                msg2 = (
+                    f"🚨 *TÍN HIỆU {signal_bol['type']}*\n"
+                    f"Cặp giao dịch: `{symbol}`\n"
+                    f"Khung thời gian Entry: `15m` (Setup `1h`)\n"
+                    f"Entry: `{signal_bol['entry']:.5f}`\n"
+                    f"Stop Loss: `{signal_bol['sl']:.5f}`\n"
+                    f"Take Profit: `{signal_bol['tp']:.5f}`\n\n"
+                    f"📖 *Lý do vào lệnh:*\n"
+                    f"{signal_bol['reason']}"
+                )
+                send_alert(msg2)
             
     # === C. CHIẾN LƯỢC PRICE ACTION ===
     for ltf in ltfs:
@@ -108,18 +123,23 @@ def process_symbol(symbol, config):
         signal_pa = check_pa_setup(df_ltf)
         
         if signal_pa:
-            signals_found += 1
-            msg3 = (
-                f"🚨 *{signal_pa['type']}*\n"
-                f"Cặp giao dịch: `{symbol}`\n"
-                f"Khung thời gian: `{ltf}`\n"
-                f"Entry: `{signal_pa['entry']:.5f}`\n"
-                f"Stop Loss: `{signal_pa['sl']:.5f}`\n"
-                f"Take Profit: `{signal_pa['tp']:.5f}`\n\n"
-                f"📖 *Lý do vào lệnh:*\n"
-                f"{signal_pa['reason']}"
-            )
-            send_alert(msg3)
+            trigger_time = str(df_ltf.iloc[-1]['datetime'])
+            sig_key = f"{symbol}_PA_{ltf}"
+            
+            if alerted_signals.get(sig_key) != trigger_time and new_alerts.get(sig_key) != trigger_time:
+                signals_found += 1
+                new_alerts[sig_key] = trigger_time
+                msg3 = (
+                    f"🚨 *{signal_pa['type']}*\n"
+                    f"Cặp giao dịch: `{symbol}`\n"
+                    f"Khung thời gian: `{ltf}`\n"
+                    f"Entry: `{signal_pa['entry']:.5f}`\n"
+                    f"Stop Loss: `{signal_pa['sl']:.5f}`\n"
+                    f"Take Profit: `{signal_pa['tp']:.5f}`\n\n"
+                    f"📖 *Lý do vào lệnh:*\n"
+                    f"{signal_pa['reason']}"
+                )
+                send_alert(msg3)
             
     # === B. CHIẾN LƯỢC SMC DÀI HẠN (Cần HTF Trend) ===
     htf_trend_main = "neutral"
@@ -145,7 +165,7 @@ def process_symbol(symbol, config):
                 
     if htf_trend_main in ["neutral", "conflict"]:
         print(f"  -> {symbol}: Xung đột trend HTF hoặc không rõ ràng (SMC Strategy bị bỏ qua).")
-        return signals_found
+        return signals_found, new_alerts
         
     htf_str = ", ".join(htf_confirmed).upper()
     print(f"  -> {symbol}: Trend HTF xác nhận: {htf_trend_main.upper()} ({htf_str}). Đang tìm điểm SMC Entry...")
@@ -159,19 +179,24 @@ def process_symbol(symbol, config):
         signal_smc = check_smc_setup(df_ltf, htf_trend_main, htf_confirmed)
         
         if signal_smc:
-            signals_found += 1
-            msg = (
-                f"🚨 *TÍN HIỆU {signal_smc['type']} (SMC)*\n"
-                f"Cặp giao dịch: `{symbol}`\n"
-                f"Khung thời gian Entry: `{ltf}`\n"
-                f"Entry: `{signal_smc['entry']:.5f}`\n"
-                f"Stop Loss: `{signal_smc['sl']:.5f}`\n"
-                f"Take Profit: `{signal_smc['tp']:.5f}`\n\n"
-                f"📖 *Lý do vào lệnh:*\n"
-                f"{signal_smc['reason']}"
-            )
-            send_alert(msg)
+            trigger_time = str(df_ltf.iloc[-1]['datetime'])
+            sig_key = f"{symbol}_SMC_{ltf}"
             
-    return signals_found
+            if alerted_signals.get(sig_key) != trigger_time and new_alerts.get(sig_key) != trigger_time:
+                signals_found += 1
+                new_alerts[sig_key] = trigger_time
+                msg = (
+                    f"🚨 *TÍN HIỆU {signal_smc['type']} (SMC)*\n"
+                    f"Cặp giao dịch: `{symbol}`\n"
+                    f"Khung thời gian Entry: `{ltf}`\n"
+                    f"Entry: `{signal_smc['entry']:.5f}`\n"
+                    f"Stop Loss: `{signal_smc['sl']:.5f}`\n"
+                    f"Take Profit: `{signal_smc['tp']:.5f}`\n\n"
+                    f"📖 *Lý do vào lệnh:*\n"
+                    f"{signal_smc['reason']}"
+                )
+                send_alert(msg)
+            
+    return signals_found, new_alerts
 if __name__ == "__main__":
     scan_markets()

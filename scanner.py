@@ -6,6 +6,7 @@ from binance_api import fetch_ohlcv
 from indicators import add_indicators
 from smc_strategy import get_trend, check_smc_setup
 from bollinger_strategy import check_bollinger_setup
+from price_action_strategy import check_pa_setup
 from telegram_bot import send_alert
 
 def load_config():
@@ -96,6 +97,29 @@ def process_symbol(symbol, config):
                 f"{signal_bol['reason']}"
             )
             send_alert(msg2)
+            
+    # === C. CHIẾN LƯỢC PRICE ACTION ===
+    for ltf in ltfs:
+        df_ltf = fetch_ohlcv(symbol, ltf, limit=200)
+        if df_ltf.empty:
+            continue
+            
+        df_ltf = add_indicators(df_ltf) # Cần cho EMA của Pinbar
+        signal_pa = check_pa_setup(df_ltf)
+        
+        if signal_pa:
+            signals_found += 1
+            msg3 = (
+                f"🚨 *{signal_pa['type']}*\n"
+                f"Cặp giao dịch: `{symbol}`\n"
+                f"Khung thời gian: `{ltf}`\n"
+                f"Entry: `{signal_pa['entry']:.5f}`\n"
+                f"Stop Loss: `{signal_pa['sl']:.5f}`\n"
+                f"Take Profit: `{signal_pa['tp']:.5f}`\n\n"
+                f"📖 *Lý do vào lệnh:*\n"
+                f"{signal_pa['reason']}"
+            )
+            send_alert(msg3)
             
     # === B. CHIẾN LƯỢC SMC DÀI HẠN (Cần HTF Trend) ===
     htf_trend_main = "neutral"

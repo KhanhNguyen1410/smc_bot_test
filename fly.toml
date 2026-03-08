@@ -1,5 +1,5 @@
 app = "smc-scanner-bot"
-primary_region = "sin" # Singapore region for better latency, or use your preferred
+primary_region = "sin"
 
 [build]
   dockerfile = "Dockerfile"
@@ -8,4 +8,6 @@ primary_region = "sin" # Singapore region for better latency, or use your prefer
   PYTHONUNBUFFERED = "1"
   PYTHONIOENCODING = "utf-8"
 
-# No [http_service] section since this is a background worker without web endpoints
+# Cấu hình chạy Machine như một Cronjob (mỗi 15 phút tại phút 00, 15, 30, 45)
+[machine]
+  schedule = "0,15,30,45 * * * *"

@@ -6,7 +6,7 @@ from binance_api import fetch_ohlcv
 from indicators import add_indicators
 from smc_strategy import get_trend, check_smc_setup
 from bollinger_strategy import check_bollinger_setup
-from price_action_strategy import check_pa_setup
+from price_action_strategy import check_pa_setup, check_htf_support_resistance
 from telegram_bot import send_alert
 
 def load_config():
@@ -152,6 +152,27 @@ def process_symbol(symbol, config, alerted_signals):
             
         df_htf = add_indicators(df_htf)
         trend = get_trend(df_htf)
+        
+        # Bổ sung logic HTF Support/Resistance Bounce
+        signal_htf_pa = check_htf_support_resistance(df_htf)
+        if signal_htf_pa:
+            trigger_time = str(df_htf.iloc[-1]['datetime'])
+            sig_key = f"{symbol}_HTF_PA_{htf}"
+            
+            if alerted_signals.get(sig_key) != trigger_time and new_alerts.get(sig_key) != trigger_time:
+                signals_found += 1
+                new_alerts[sig_key] = trigger_time
+                msg_htf = (
+                    f"🚨 *{signal_htf_pa['type']}*\n"
+                    f"Cặp giao dịch: `{symbol}`\n"
+                    f"Khung thời gian: `{htf}`\n"
+                    f"Entry: `{signal_htf_pa['entry']:.5f}`\n"
+                    f"Stop Loss: `{signal_htf_pa['sl']:.5f}`\n"
+                    f"Take Profit: `{signal_htf_pa['tp']:.5f}`\n\n"
+                    f"📖 *Lý do vào lệnh:*\n"
+                    f"{signal_htf_pa['reason']}"
+                )
+                send_alert(msg_htf)
         
         if trend != "neutral":
             if htf_trend_main == "neutral":

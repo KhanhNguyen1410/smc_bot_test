@@ -3,8 +3,8 @@ import numpy as np
 
 def check_pa_setup(df: pd.DataFrame):
     """
-    Hàm chính kiểm tra 3 setup Price Action.
-    Ưu tiên thứ tự: Breakout & Retest > Pinbar/Engulfing > Inside Bar Breakout
+    Hàm chính kiểm tra các setup Price Action.
+    Ưu tiên thứ tự: Breakout & Retest > Inside Bar Breakout
     """
     if len(df) < 20: 
         return None
@@ -14,11 +14,6 @@ def check_pa_setup(df: pd.DataFrame):
     if br_signal:
         return br_signal
         
-    # Check Pinbar / Engulfing tại Swing points
-    pe_signal = check_pinbar_engulfing(df)
-    if pe_signal:
-        return pe_signal
-        
     # Check Inside Bar Breakout
     ib_signal = check_inside_bar(df)
     if ib_signal:
@@ -26,89 +21,88 @@ def check_pa_setup(df: pd.DataFrame):
         
     return None
 
-def check_pinbar_engulfing(df: pd.DataFrame):
+def check_htf_support_resistance(df_4h: pd.DataFrame):
     """
-    Tìm Pin Bar hoặc Engulfing tại các vùng hỗ trợ / kháng cự (dựa vào Swing High/Low)
+    Tìm tín hiệu đảo chiều (Bounce) tại các vùng Hỗ Trợ/Kháng Cự cứng trên khung 4H.
+    Sử dụng thuật toán Cluster (gom cụm) Swing High/Low để tạo vùng cản vĩ mô.
     """
-    current_idx = df.index[-1]
-    prev_idx = df.index[-2]
+    if len(df_4h) < 100:
+        return None
+        
+    last_candle = df_4h.iloc[-1]
     
-    current_candle = df.loc[current_idx]
-    prev_candle = df.loc[prev_idx]
+    # 1. Tìm các vùng cản cứng (Clustering Swing Highs/Lows)
+    swing_highs = df_4h[df_4h['swing_high'] == True]['high'].values
+    swing_lows = df_4h[df_4h['swing_low'] == True]['low'].values
     
-    # Tính toán râu nến và thân nến hiện tại
-    body_size = abs(current_candle['open'] - current_candle['close'])
-    upper_wick = current_candle['high'] - max(current_candle['open'], current_candle['close'])
-    lower_wick = min(current_candle['open'], current_candle['close']) - current_candle['low']
-    total_len = current_candle['high'] - current_candle['low']
+    # Hàm con để gom cụm (Clustering) các mức giá gần nhau (độ lệch <= 1%)
+    def get_clusters(prices, threshold_pct=0.01):
+        if len(prices) == 0: return []
+        sorted_prices = np.sort(prices)
+        clusters = []
+        current_cluster = [sorted_prices[0]]
+        
+        for price in sorted_prices[1:]:
+            if (price - np.mean(current_cluster)) / np.mean(current_cluster) <= threshold_pct:
+                current_cluster.append(price)
+            else:
+                clusters.append(np.mean(current_cluster))
+                current_cluster = [price]
+        if current_cluster:
+            clusters.append(np.mean(current_cluster))
+        return clusters
+
+    resistance_zones = get_clusters(swing_highs)
+    support_zones = get_clusters(swing_lows)
+    
+    # Chiều dài và Râu nến
+    body_size = abs(last_candle['open'] - last_candle['close'])
+    upper_wick = last_candle['high'] - max(last_candle['open'], last_candle['close'])
+    lower_wick = min(last_candle['open'], last_candle['close']) - last_candle['low']
+    total_len = last_candle['high'] - last_candle['low']
     
     if total_len == 0:
         return None
         
-    is_bullish = current_candle['close'] > current_candle['open']
-    is_bearish = current_candle['close'] < current_candle['open']
+    # Điều kiện Volume: Volume nến này phải > 1.2 lần trung bình 20 phiên
+    has_high_volume = 'volume_sma_20' in last_candle and last_candle['volume'] > last_candle['volume_sma_20'] * 1.2
     
-    # --- Định nghĩa nến ---
-    # Bullish Pinbar: Râu dưới dài (>= 2 lần thân) và râu trên ngắn
-    is_bullish_pinbar = (lower_wick >= 2 * body_size) and (upper_wick <= body_size) and total_len > 0
-    
-    # Bearish Pinbar: Râu trên dài (>= 2 lần thân) và râu dưới ngắn
-    is_bearish_pinbar = (upper_wick >= 2 * body_size) and (lower_wick <= body_size) and total_len > 0
-    
-    # Bullish Engulfing: Nến trước giảm, nến nay tăng và thân nến nay bao trùm thân nến trước
-    prev_body = abs(prev_candle['open'] - prev_candle['close'])
-    is_bullish_engulfing = (prev_candle['close'] < prev_candle['open']) and is_bullish and (body_size > prev_body) and (current_candle['close'] > prev_candle['open']) and (current_candle['open'] < prev_candle['close'])
-    
-    # Bearish Engulfing: Nến trước tăng, nến nay giảm và thân nến nay bao trùm thân nến trước
-    is_bearish_engulfing = (prev_candle['close'] > prev_candle['open']) and is_bearish and (body_size > prev_body) and (current_candle['close'] < prev_candle['open']) and (current_candle['open'] > prev_candle['close'])
+    # 2. LONG SETUP: Chạm Support cứng và Rút chân dưới cực mạnh (Râu >= 1.5 thân) + Volume khủng
+    if has_high_volume and lower_wick >= 1.5 * body_size and lower_wick > upper_wick:
+        # Kiểm tra xem mức giá Low có quét qua hoặc chạm Support nào không (sai số 0.5%)
+        for sz in support_zones:
+            if abs(last_candle['low'] - sz) / sz <= 0.005:
+                entry = last_candle['close']
+                sl = last_candle['low'] * 0.998 # Đặt sl dưới điểm thấp nhất xíu
+                tp = entry * 1.02 # Cố định lợi nhuận 2%
+                
+                # Check RR (Chấp nhận mạo hiểm tới SL ~ 3-4% cho bắt đỉnh do biên TP lớn, điều chỉnh RR cho phù hợp thực tế)
+                if (entry - sl) > 0 and (entry - sl)/entry <= 0.04: 
+                    return {
+                        "type": "HTF SUPPORT BOUNCE",
+                        "entry": entry,
+                        "sl": sl,
+                        "tp": tp,
+                        "reason": f"Khung lớn chạm hỗ trợ cứng khu vực ({sz:.4f}) rồi rút chân mạnh, kèm Volume đột biến xác nhận dòng tiền gom hàng. Chốt tối thiểu 2.0%."
+                    }
 
-    # --- Đánh giá vị trí (so với EMA 50 hoặc Swing) ---
-    # Đơn giản hoá bằng cách xem xét EMA 50 để thuận Trend
-    ema50 = current_candle['ema_50'] if 'ema_50' in current_candle else None
-    
-    if (is_bullish_pinbar or is_bullish_engulfing):
-        # Ưu tiên mua nếu giá đang mấp mé dội lên từ EMA hoặc EMA đang hướng lên
-        if ema50 is None or current_candle['low'] <= ema50 * 1.002:
-            entry = current_candle['close']
-            sl = current_candle['low'] - (current_candle['high'] - current_candle['low']) * 0.1
-            tp = entry + (entry - sl) * 2 # RR 1:2
-            
-            # Đảm bảo TP lớn hơn hoặc bằng 2.0%
-            min_tp_price = entry * 1.02
-            if tp < min_tp_price:
-                tp = min_tp_price
-                sl = entry - ((tp - entry) / 2) # Nới SL để giữ nguyên RR 1:2
-            
-            pattern_name = "Bullish Pinbar" if is_bullish_pinbar else "Bullish Engulfing"
-            return {
-                "type": "PRICE ACTION - LONG (Reversal)",
-                "entry": entry,
-                "sl": sl,
-                "tp": tp,
-                "reason": f"Phát hiện mẫu hình nến {pattern_name} bật tăng từ vùng hỗ trợ / EMA."
-            }
-            
-    if (is_bearish_pinbar or is_bearish_engulfing):
-        if ema50 is None or current_candle['high'] >= ema50 * 0.998:
-            entry = current_candle['close']
-            sl = current_candle['high'] + (current_candle['high'] - current_candle['low']) * 0.1
-            tp = entry - (sl - entry) * 2 # RR 1:2
-            
-            # Đảm bảo TP lớn hơn hoặc bằng 2.0%
-            min_tp_price = entry * 0.98
-            if tp > min_tp_price:
-                tp = min_tp_price
-                sl = entry + ((entry - tp) / 2) # Nới SL để giữ nguyên RR 1:2
-            
-            pattern_name = "Bearish Pinbar" if is_bearish_pinbar else "Bearish Engulfing"
-            return {
-                "type": "PRICE ACTION - SHORT (Reversal)",
-                "entry": entry,
-                "sl": sl,
-                "tp": tp,
-                "reason": f"Phát hiện mẫu hình nến {pattern_name} bị từ chối giá tại vùng kháng cự / EMA."
-            }
-
+    # 3. SHORT SETUP: Chạm Resistance cứng và Rút râu trên cực mạnh (Râu >= 1.5 thân) + Volume khủng
+    if has_high_volume and upper_wick >= 1.5 * body_size and upper_wick > lower_wick:
+        for rz in resistance_zones:
+            if abs(last_candle['high'] - rz) / rz <= 0.005:
+                entry = last_candle['close']
+                sl = last_candle['high'] * 1.002
+                tp = entry * 0.98
+                
+                if (sl - entry) > 0 and (sl - entry)/entry <= 0.04:
+                    return {
+                        "type": "HTF RESISTANCE BOUNCE",
+                        "entry": entry,
+                        "sl": sl,
+                        "tp": tp,
+                        "reason": f"Khung lớn chạm kháng cự cứng khu vực ({rz:.4f}) bị từ chối giá kịch liệt, kèm Volume xả lớn. Chốt tối thiểu 2.0%."
+                    }
+                    
     return None
 
 def check_inside_bar(df: pd.DataFrame):
